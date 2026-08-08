@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Heti álláskereső — manifest</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  :root {
+    --ink: #1B2430;
+    --paper: #F6F4EE;
+    --muted: #8A8272;
+    --muted2: #6B6255;
+    --hairline: #D8D3C7;
+    --green-bg: #ECFAF3; --green-border: #A7E3C4; --green-text: #0F5132; --green-tag: #1F7A4D;
+    --amber-bg: #FEF6E7; --amber-border: #F3D48A; --amber-text: #7A4E0A; --amber-tag: #B8790E;
+    --red-bg: #FBEDEC; --red-border: #E4B4B0; --red-text: #7A2E2A; --red-tag: #A93A35;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+  }
+  .mono { font-family: "SF Mono", "Courier New", monospace; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 60px; }
+  header {
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 16px;
+    margin-bottom: 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .eyebrow {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: var(--muted2);
+    margin: 0 0 4px;
+  }
+  h1 { font-size: 24px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+  .meta { font-size: 12px; color: var(--muted); margin-top: 8px; }
+  button#refresh {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border: 1px solid var(--ink);
+    background: transparent;
+    color: var(--ink);
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  button#refresh:hover { background: var(--ink); color: var(--paper); }
+  #search {
+    width: 100%;
+    padding: 10px 12px 10px 34px;
+    font-size: 14px;
+    border: 1px solid var(--hairline);
+    border-radius: 6px;
+    background: #fff url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" stroke="%238A8272" stroke-width="2"><circle cx="6" cy="6" r="5"/><line x1="10" y1="10" x2="13" y2="13"/></svg>') 10px center no-repeat;
+    color: var(--ink);
+    margin-bottom: 20px;
+  }
+  #status { text-align: center; padding: 60px 0; font-size: 14px; color: var(--muted); }
+  .error-box {
+    border: 1px solid var(--red-border);
+    background: var(--red-bg);
+    border-radius: 6px;
+    padding: 14px 16px;
+    color: var(--red-text);
+    font-size: 13px;
+  }
+  .job {
+    border: 1px solid var(--hairline);
+    background: #fff;
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 12px;
+    display: flex;
+    gap: 14px;
+  }
+  .score-tag {
+    flex-shrink: 0;
+    width: 48px; height: 48px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff;
+    font-weight: 700;
+    font-size: 13px;
+  }
+  .job-title {
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .job-title:hover { text-decoration: underline; }
+  .job-sub { font-size: 12px; color: var(--muted2); margin: 3px 0 8px; }
+  .job-reason { font-size: 13.5px; color: #2E3440; margin: 0 0 8px; }
+  .salary-pill {
+    display: inline-block;
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 5px;
+  }
+  footer { text-align: center; font-size: 11px; color: #B0AA9C; margin-top: 32px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <p class="eyebrow mono">Heti álláskereső · manifest</p>
+        <h1 id="title">Talált pozíciók</h1>
+      </div>
+      <button id="refresh">↻ Frissítés</button>
+    </header>
+    <p class="meta mono" id="meta"></p>
+
+    <input id="search" placeholder="Szűrés munkakör, cég vagy indoklás alapján..." style="display:none" />
+    <div id="status">Adatok betöltése...</div>
+    <div id="list"></div>
+
+    <footer>
+      Ez az oldal közvetlenül a publikált Google Sheet-ből olvas — minden csütörtöki
+      automatikus futás után frissül a tartalma, kézi másolás nélkül.
+    </footer>
+  </div>
+
+<script>
+  const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQWTTXyu7aVF9liz6ur0wkaHHst-4V4IjSS6DsS3my0oF-37Zaf1lZImrpk6AV7ETLh9UjfUSVo3WQz/pub?gid=1406022163&single=true&output=csv";
+
+  let allJobs = [];
+
+  function scoreTone(score) {
+    const n = Number(score);
+    if (n >= 8) return { bg: "var(--green-bg)", border: "var(--green-border)", text: "var(--green-text)", tag: "var(--green-tag)" };
+    if (n >= 5) return { bg: "var(--amber-bg)", border: "var(--amber-border)", text: "var(--amber-text)", tag: "var(--amber-tag)" };
+    return { bg: "var(--red-bg)", border: "var(--red-border)", text: "var(--red-text)", tag: "var(--red-tag)" };
+  }
+
+  function escapeHtml(str) {
+    return String(str || "")
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function render(jobs) {
+    const list = document.getElementById("list");
+    if (jobs.length === 0) {
+      list.innerHTML = '<p style="text-align:center;padding:40px 0;color:var(--muted)" class="mono">Nincs a szűrésnek megfelelő találat.</p>';
+      return;
+    }
+    list.innerHTML = jobs.map(job => {
+      const tone = scoreTone(job.score);
+      return `
+        <div class="job" style="border-color:${tone.border}">
+          <div class="score-tag mono" style="background:${tone.tag}">${job.score}/10</div>
+          <div style="min-width:0;flex:1">
+            <a class="job-title" href="${escapeHtml(job.link || '#')}" target="_blank" rel="noreferrer">${escapeHtml(job.title)} ↗</a>
+            <p class="job-sub mono">${escapeHtml(job.company)} · ${escapeHtml(job.source)}</p>
+            <p class="job-reason">${escapeHtml(job.reason)}</p>
+            <span class="salary-pill mono" style="background:${tone.bg};color:${tone.text}">${escapeHtml(job.salary)}</span>
+          </div>
+        </div>`;
+    }).join("");
+  }
+
+  function applyFilter() {
+    const q = document.getElementById("search").value.trim().toLowerCase();
+    if (!q) { render(allJobs); return; }
+    render(allJobs.filter(j =>
+      j.title.toLowerCase().includes(q) ||
+      j.company.toLowerCase().includes(q) ||
+      j.reason.toLowerCase().includes(q)
+    ));
+  }
+
+  function loadData() {
+    document.getElementById("status").style.display = "block";
+    document.getElementById("status").textContent = "Adatok betöltése...";
+    document.getElementById("search").style.display = "none";
+    document.getElementById("list").innerHTML = "";
+
+    fetch(CSV_URL, { cache: "no-store" })
+      .then(res => { if (!res.ok) throw new Error("HTTP " + res.status); return res.text(); })
+      .then(csvText => {
+        const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+        allJobs = (parsed.data || [])
+          .filter(r => r["Munkakör"])
+          .map(r => ({
+            date: r["Dátum"] || "",
+            title: r["Munkakör"] || "",
+            company: r["Cég"] || "",
+            score: Number(r["Pontszám"]) || 0,
+            salary: r["Bér"] || "nincs megadva",
+            reason: r["Miért illik"] || "",
+            link: r["Link"] || "",
+            source: r["Forrás"] || "",
+          }))
+          .sort((a, b) => b.score - a.score);
+
+        document.getElementById("status").style.display = "none";
+        document.getElementById("search").style.display = "block";
+        document.getElementById("title").textContent =
+          "Talált pozíciók" + (allJobs[0] ? " — " + allJobs[0].date : "");
+        document.getElementById("meta").textContent =
+          allJobs.length + " találat · forrás: Google Sheet (automatikus, heti frissítés) · lekérve " +
+          new Date().toLocaleTimeString("hu-HU");
+        render(allJobs);
+      })
+      .catch(err => {
+        document.getElementById("status").innerHTML =
+          '<div class="error-box">Nem sikerült betölteni az adatokat.<br><span class="mono">' + escapeHtml(err.message) + '</span></div>';
+      });
+  }
+
+  document.getElementById("refresh").addEventListener("click", loadData);
+  document.getElementById("search").addEventListener("input", applyFilter);
+  loadData();
+</script>
+</body>
+</html>
